@@ -1,0 +1,80 @@
+[project]
+name = "torchestra"
+version = "0.1.0"
+requires-python = ">=3.10.12"
+authors = [
+    {name="Jussi Kalliokoski", email="jussi.kalliokoski@gmail.com"},
+]
+dependencies = [
+    "torch==2.2.2",
+]
+license = {text = "MIT License"}
+readme = "README.md"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+keywords = [
+    "torch",
+    "torchscript",
+    "pytorch",
+    "feature",
+    "typing",
+    "ray",
+    "preprocessing",
+]
+
+[project.urls]
+"Homepage" = "https://github.com/jussi-kalliokoski/torchestra"
+"Bug Tracker" = "https://github.com/jussi-kalliokoski/torchestra/issues"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.sdist]
+exclude = [
+    ".github",
+    ".python-version",
+    "htmlcov",
+    "test_*.py",
+    "logo.svg",
+]
+
+[tool.hatch.build.target.wheel]
+packages = ["src/torchestra"]
+exclude = [
+    ".github",
+    ".python-version",
+    "htmlcov",
+    "test_*.py",
+    "logo.svg",
+]
+
+[tool.ruff]
+line-length = 120
+indent-width = 4
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+docstring-code-format = true
+line-ending = "lf"
+
+[tool.ruff.lint]
+extend-select = ["I"]
+
+[tool.uv]
+dev-dependencies = [
+    "mypy>=1.11.2",
+    "pytest>=8.3.3",
+    "pytest-cov>=5.0.0",
+    "ruff>=0.6.4",
+    "numpy==1.26.4",
+    "hatch>=1.12.0",
+]
+
+[tool.coverage.run]
+omit = ["test_*.py"]
+

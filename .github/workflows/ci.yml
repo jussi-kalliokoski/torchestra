@@ -1,0 +1,26 @@
+name: CI
+on: [push]
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: Install uv
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          echo "PATH=$PATH:$HOME/.cargo/bin" >> "$GITHUB_ENV"
+      - name: Install Dependencies
+        run: |
+          uv venv
+          uv pip install .
+          echo "PATH=$PATH:$(pwd)/.venv/bin" >> "$GITHUB_ENV"
+      - name: Run Tests
+        run: uv run pytest .
+      - name: Type Check
+        run: uv run mypy .
+      - name: Lint
+        run: uv run ruff check --output-format=github .
+      - name: Formatting
+        run: uv run ruff format --check .
