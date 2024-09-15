@@ -1,5 +1,10 @@
 # torchestra
 
+[![CI status](https://github.com/jussi-kalliokoski/torchestra/workflows/CI/badge.svg)](https://github.com/jussi-kalliokoski/torchestra/actions)
+[![linting - Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
+[![types - Mypy](https://img.shields.io/badge/types-Mypy-blue.svg)](https://github.com/python/mypy)
+[![License - MIT](https://img.shields.io/badge/license-MIT-9400d3.svg)](https://spdx.org/licenses/)
+
 A collection of feature engineering utilities for easily composing preprocessing pipelines for PyTorch models.
 
 ## Introduction
