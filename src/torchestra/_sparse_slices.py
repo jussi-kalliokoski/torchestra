@@ -102,16 +102,6 @@ class SparseTruncPad(torch.nn.Module):
 
     def forward(self, values_and_indices: Tuple[torch.Tensor, torch.Tensor]) -> torch.Tensor:
         values, indices = self.sparse_trunc(values_and_indices)
-        print(
-            [
-                torch.nn.functional.pad(
-                    values[i[0] : i[1]],
-                    pad=(0, self.sparse_trunc.indices_trunc.length - int(i[1] - i[0])),
-                    value=self.value,
-                )
-                for i in indices
-            ]
-        )
         return torch.stack(
             [
                 torch.nn.functional.pad(
