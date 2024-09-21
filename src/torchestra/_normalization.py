@@ -626,3 +626,66 @@ class TDigestDistribution(torch.nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self._digests.cdf(self.t, x)
+
+
+class RobustScale(torch.nn.Module):
+    """
+    Applies robust scaling to the input data.
+
+    The median and interquartile range are calculated in the stats calculation
+    phase of the preprocessing pipeline using the T-Digest algorithm.
+    """
+
+    median: torch.Tensor
+    iqr: torch.Tensor
+
+    def __init__(self, compression: float = 1000.0):
+        super().__init__()
+        self._digests = TDigest(compression)
+        self.register_buffer("median", torch.tensor(0.0, dtype=torch.float64))
+        self.register_buffer("iqr", torch.tensor(1.0, dtype=torch.float64))
+
+    def calculate_stats(self, x: torch.Tensor) -> TDigestStorage:
+        """
+        Calculates the median and interquartile range from the input data.
+
+        Used by the preprocessing pipeline.
+
+        Args:
+            x: The data from which to calculate the statistics.
+        """
+        t = self._digests.new_digest()
+        self._digests.add_centroids(t, x, torch.ones_like(x))
+        return t
+
+    def combine_stats(self, stats: List[TDigestStorage]) -> TDigestStorage:
+        """
+        Combines the statistics of multiple datasets.
+
+        Used by the preprocessing pipeline.
+
+        Args:
+            stats: The list of statistics to combine.
+        """
+        t = self._digests.new_digest()
+        for s in stats:
+            self._digests.merge_digests(t, s)
+        return t
+
+    def apply_stats(self, t: TDigestStorage) -> None:
+        """
+        Applies the calculated statistics to the module.
+
+        Used by the preprocessing pipeline.
+
+        Args:
+            t: The statistics to apply.
+        """
+        self._digests.finalize(t)
+        self.median = self._digests.quantile(t, torch.tensor(0.5, dtype=torch.float64))
+        q1 = self._digests.quantile(t, torch.tensor(0.25, dtype=torch.float64))
+        q3 = self._digests.quantile(t, torch.tensor(0.75, dtype=torch.float64))
+        self.iqr = q3 - q1
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return (x - self.median) / self.iqr

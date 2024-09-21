@@ -29,6 +29,9 @@ from ._normalization import (
     MinMaxScale as MinMaxScale,
 )
 from ._normalization import (
+    RobustScale as RobustScale,
+)
+from ._normalization import (
     StandardScore as StandardScore,
 )
 from ._normalization import (
