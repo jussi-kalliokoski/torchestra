@@ -4,6 +4,89 @@ from typing import Any, Dict, List, Tuple
 import torch
 
 
+class MinMaxScale(torch.nn.Module):
+    """
+    Applies min-max scaling to the input data.
+
+    The minimum and maximum values are calculated in the stats calculation
+    phase of the preprocessing pipeline.
+    """
+
+    vmin: torch.Tensor
+    vdelta: torch.Tensor
+
+    def __init__(self):
+        super().__init__()
+        self.register_buffer("vmin", torch.tensor(torch.inf, dtype=torch.float64))
+        self.register_buffer("vdelta", torch.tensor(torch.inf, dtype=torch.float64))
+
+    def calculate_stats(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Calculates the minimum and maximum values from the input data.
+
+        Used by the preprocessing pipeline.
+
+        Args:
+            x: The data of which to calculate the statistics.
+        """
+        dim = len(self.vmin.shape) - 1
+        x = x.transpose(0, dim)
+        vmin = x.min(dim=dim).values
+        vmax = x.max(dim=dim).values
+        return vmin, vmax
+
+    def combine_stats(self, stats: List[Tuple[torch.Tensor, torch.Tensor]]) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Combines the statistics of multiple datasets.
+
+        Used by the preprocessing pipeline.
+
+        Args:
+            stats: The list of statistics to combine.
+
+        Returns:
+            The combined statistics.
+        """
+        dim = len(self.vmin.shape) - 1
+        vmin = torch.stack([v for v, _ in stats], dim=dim).min(dim=dim).values
+        vmax = torch.stack([v for _, v in stats], dim=dim).max(dim=dim).values
+        return vmin, vmax
+
+    def apply_stats(self, stats: Tuple[torch.Tensor, torch.Tensor]) -> None:
+        """
+        Applies the calculated statistics to the module.
+
+        Used by the preprocessing pipeline.
+
+        Args:
+            stats: The statistics to apply.
+        """
+        self.vmin, vmax = stats
+        self.vdelta = vmax - self.vmin
+
+    @staticmethod
+    def stack(modules: List["MinMaxScale"]) -> "MinMaxScale":
+        """
+        Stacks the provided modules into a single MinMaxScale operating on a stack of the inputs.
+
+        The stacked MinMaxScale allows running the calculation of multiple
+        features in the same batch, resulting in a more efficient module graph.
+
+        Args:
+            modules: The list of modules to stack.
+
+        Returns:
+            A module that operates on a stack of the original inputs.
+        """
+        stacked = MinMaxScale()
+        stacked.vmin = torch.stack([m.vmin for m in modules])
+        stacked.vdelta = torch.stack([m.vdelta for m in modules])
+        return stacked
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return (x - self.vmin) / self.vdelta
+
+
 class StandardScore(torch.nn.Module):
     """
     Applies standard score normalization to the input data.
