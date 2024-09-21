@@ -3,7 +3,7 @@ from typing import List, Tuple
 import numpy as np
 import torch
 
-from torchestra import MeanScale, MinMaxScale, StandardScore, TDigest, TDigestDistribution, TDigestStorage
+from torchestra import MeanScale, MinMaxScale, RobustScale, StandardScore, TDigest, TDigestDistribution, TDigestStorage
 
 
 def test_mean_scale():
@@ -684,3 +684,95 @@ def test_t_digest_distribution_script_stats():
     received = compiled(quantiles)
 
     assert torch.allclose(received, expected, atol=1e-2)
+
+
+def test_robust_scale():
+    train1 = torch.rand(100, dtype=torch.float64)
+    train2 = torch.rand(100, dtype=torch.float64)
+    valid = torch.rand(100, dtype=torch.float64)
+    train_combined = torch.cat([train1, train2])
+    train_median = train_combined.median()
+    train_q1 = train_combined.quantile(0.25)
+    train_q3 = train_combined.quantile(0.75)
+    train_iqr = train_q3 - train_q1
+    expected = (valid - train_median) / train_iqr
+    module = RobustScale()
+    stats1 = module.calculate_stats(train1)
+    stats2 = module.calculate_stats(train2)
+    stats = module.combine_stats([stats1, stats2])
+    module.apply_stats(stats)
+
+    received = module(valid)
+
+    assert torch.allclose(module.median, train_median, atol=1e-1)
+    assert torch.allclose(module.iqr, train_iqr, atol=1e-1)
+    assert torch.allclose(received, expected, atol=1e-1)
+
+
+def test_robust_scale_state_dict():
+    train1 = torch.rand(100, dtype=torch.float64)
+    train2 = torch.rand(100, dtype=torch.float64)
+    valid = torch.rand(100, dtype=torch.float64)
+    train_combined = torch.cat([train1, train2])
+    train_median = train_combined.median()
+    train_q1 = train_combined.quantile(0.25)
+    train_q3 = train_combined.quantile(0.75)
+    train_iqr = train_q3 - train_q1
+    expected = (valid - train_median) / train_iqr
+    module = RobustScale()
+    stats1 = module.calculate_stats(train1)
+    stats2 = module.calculate_stats(train2)
+    stats = module.combine_stats([stats1, stats2])
+    module.apply_stats(stats)
+    state_dict = module.state_dict()
+    module = RobustScale()
+    module.load_state_dict(state_dict)
+
+    received = module(valid)
+
+    assert torch.allclose(module.median, train_median, atol=1e-1)
+    assert torch.allclose(module.iqr, train_iqr, atol=1e-1)
+    assert torch.allclose(received, expected, atol=1e-1)
+
+
+def test_robust_scale_script_stats():
+    class CalculateStatsModule(torch.nn.Module):
+        def __init__(self, mod):
+            super().__init__()
+            self.mod = mod
+
+        def forward(self, x: torch.Tensor) -> TDigestStorage:
+            return self.mod.calculate_stats(x)
+
+    class CombineStatsModule(torch.nn.Module):
+        def __init__(self, mod):
+            super().__init__()
+            self.mod = mod
+
+        def forward(self, x: List[TDigestStorage]) -> TDigestStorage:
+            return self.mod.combine_stats(x)
+
+    train1 = torch.rand(100, dtype=torch.float64)
+    train2 = torch.rand(100, dtype=torch.float64)
+    valid = torch.rand(100, dtype=torch.float64)
+    train_combined = torch.cat([train1, train2])
+    train_median = train_combined.median()
+    train_q1 = train_combined.quantile(0.25)
+    train_q3 = train_combined.quantile(0.75)
+    train_iqr = train_q3 - train_q1
+    expected = (valid - train_median) / train_iqr
+    module = RobustScale()
+    calculate_stats = torch.jit.script(CalculateStatsModule(module))
+    combine_stats = torch.jit.script(CombineStatsModule(module))
+
+    stats1 = calculate_stats(train1)
+    stats2 = calculate_stats(train2)
+    stats = combine_stats([stats1, stats2])
+    module.apply_stats(stats)
+    compiled = torch.jit.script(module)
+
+    received = compiled(valid)
+
+    assert torch.allclose(module.median, train_median, atol=1e-1)
+    assert torch.allclose(module.iqr, train_iqr, atol=1e-1)
+    assert torch.allclose(received, expected, atol=1e-1)
