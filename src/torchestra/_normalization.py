@@ -4,6 +4,93 @@ from typing import Any, Dict, List, Tuple
 import torch
 
 
+class MeanScale(torch.nn.Module):
+    """
+    Applies mean scaling (mean normalization) to the input data.
+
+    The mean, min and max values are calculated in the stats calculation phase of the
+    preprocessing pipeline.
+    """
+
+    mean: torch.Tensor
+    delta: torch.Tensor
+
+    def __init__(self):
+        super().__init__()
+        self.register_buffer("mean", torch.tensor(0.0, dtype=torch.float64))
+        self.register_buffer("delta", torch.tensor(0.0, dtype=torch.float64))
+
+    def calculate_stats(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """
+        Calculates the mean, min and max values from the input data.
+
+        Used by the preprocessing pipeline.
+
+        Args:
+            x: The data of which to calculate the statistics.
+        """
+        dim = len(self.mean.shape) - 1
+        x = x.transpose(0, dim)
+        mean = x.mean(dim=dim)
+        vmin = x.min(dim=dim).values
+        vmax = x.max(dim=dim).values
+        return mean, vmin, vmax
+
+    def combine_stats(
+        self, stats: List[Tuple[torch.Tensor, torch.Tensor, torch.Tensor]]
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """
+        Combines the statistics of multiple datasets.
+
+        Used by the preprocessing pipeline.
+
+        Args:
+            stats: The list of statistics to combine.
+
+        Returns:
+            The combined statistics.
+        """
+        dim = len(self.mean.shape) - 1
+        mean = torch.stack([m for m, _, _ in stats], dim=dim).mean(dim=dim)
+        vmin = torch.stack([v for _, v, _ in stats], dim=dim).min(dim=dim).values
+        vmax = torch.stack([v for _, _, v in stats], dim=dim).max(dim=dim).values
+        return mean, vmin, vmax
+
+    def apply_stats(self, stats: Tuple[torch.Tensor, torch.Tensor, torch.Tensor]) -> None:
+        """
+        Applies the calculated statistics to the module.
+
+        Used by the preprocessing pipeline.
+
+        Args:
+            stats: The statistics to apply.
+        """
+        self.mean, vmin, vmax = stats
+        self.delta = vmax - vmin
+
+    @staticmethod
+    def stack(modules: List["MeanScale"]) -> "MeanScale":
+        """
+        Stacks the provided modules into a single MeanScale operating on a stack of the inputs.
+
+        The stacked MeanScale allows running the calculation of multiple
+        features in the same batch, resulting in a more efficient module graph.
+
+        Args:
+            modules: The list of modules to stack.
+
+        Returns:
+            A module that operates on a stack of the original inputs.
+        """
+        stacked = MeanScale()
+        stacked.mean = torch.stack([m.mean for m in modules])
+        stacked.delta = torch.stack([m.delta for m in modules])
+        return stacked
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return (x - self.mean) / self.delta
+
+
 class MinMaxScale(torch.nn.Module):
     """
     Applies min-max scaling to the input data.

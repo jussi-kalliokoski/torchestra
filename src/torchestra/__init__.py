@@ -23,6 +23,9 @@ from ._lookups import (
     TopK as TopK,
 )
 from ._normalization import (
+    MeanScale as MeanScale,
+)
+from ._normalization import (
     MinMaxScale as MinMaxScale,
 )
 from ._normalization import (
