@@ -3,7 +3,169 @@ from typing import List, Tuple
 import numpy as np
 import torch
 
-from torchestra import StandardScore, TDigest, TDigestDistribution, TDigestStorage
+from torchestra import MinMaxScale, StandardScore, TDigest, TDigestDistribution, TDigestStorage
+
+
+def test_min_max_scale():
+    train1 = torch.rand(100, dtype=torch.float64)
+    train2 = torch.rand(100, dtype=torch.float64)
+    valid = torch.rand(100, dtype=torch.float64)
+    train_combined = torch.cat([train1, train2])
+    train_min = train_combined.min()
+    train_max = train_combined.max()
+    expected = (valid - train_min) / (train_max - train_min)
+    module = MinMaxScale()
+    stats1 = module.calculate_stats(train1)
+    stats2 = module.calculate_stats(train2)
+    stats = module.combine_stats([stats1, stats2])
+    module.apply_stats(stats)
+
+    received = module(valid)
+
+    assert torch.allclose(module.vmin, train_min)
+    assert torch.allclose(module.vdelta, train_max - train_min)
+    assert torch.allclose(received, expected)
+
+
+def test_min_max_scale_state_dict():
+    train1 = torch.rand(100, dtype=torch.float64)
+    train2 = torch.rand(100, dtype=torch.float64)
+    valid = torch.rand(100, dtype=torch.float64)
+    train_combined = torch.cat([train1, train2])
+    train_min = train_combined.min()
+    train_max = train_combined.max()
+    expected = (valid - train_min) / (train_max - train_min)
+    module = MinMaxScale()
+    stats1 = module.calculate_stats(train1)
+    stats2 = module.calculate_stats(train2)
+    stats = module.combine_stats([stats1, stats2])
+    module.apply_stats(stats)
+    state_dict = module.state_dict()
+    module = MinMaxScale()
+    module.load_state_dict(state_dict)
+
+    received = module(valid)
+
+    assert torch.allclose(module.vmin, train_min)
+    assert torch.allclose(module.vdelta, train_max - train_min)
+    assert torch.allclose(received, expected)
+
+
+def test_min_max_scale_script_stats():
+    class CalculateStatsModule(torch.nn.Module):
+        def __init__(self, mod):
+            super().__init__()
+            self.mod = mod
+
+        def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+            return self.mod.calculate_stats(x)
+
+    class CombineStatsModule(torch.nn.Module):
+        def __init__(self, mod):
+            super().__init__()
+            self.mod = mod
+
+        def forward(self, x: List[Tuple[torch.Tensor, torch.Tensor]]) -> Tuple[torch.Tensor, torch.Tensor]:
+            return self.mod.combine_stats(x)
+
+    train1 = torch.rand(100, dtype=torch.float64)
+    train2 = torch.rand(100, dtype=torch.float64)
+    valid = torch.rand(100, dtype=torch.float64)
+    train_combined = torch.cat([train1, train2])
+    train_min = train_combined.min()
+    train_max = train_combined.max()
+    expected = (valid - train_min) / (train_max - train_min)
+    module = MinMaxScale()
+    calculate_stats = torch.jit.script(CalculateStatsModule(module))
+    combine_stats = torch.jit.script(CombineStatsModule(module))
+
+    stats1 = calculate_stats(train1)
+    stats2 = calculate_stats(train2)
+    stats = combine_stats([stats1, stats2])
+    module.apply_stats(stats)
+    compiled = torch.jit.script(module)
+
+    received = compiled(valid)
+
+    assert torch.allclose(module.vmin, train_min)
+    assert torch.allclose(module.vdelta, train_max - train_min)
+    assert torch.allclose(received, expected)
+
+
+def test_min_max_scale_stacked():
+    train1 = torch.rand(50, dtype=torch.float64)
+    train2 = torch.rand(50, dtype=torch.float64)
+    train3 = torch.rand(50, dtype=torch.float64)
+    train4 = torch.rand(50, dtype=torch.float64)
+    valid1 = torch.rand(50, dtype=torch.float64)
+    valid2 = torch.rand(50, dtype=torch.float64)
+    train1_combined = torch.cat([train1, train2])
+    train2_combined = torch.cat([train3, train4])
+    train_min1 = train1_combined.min()
+    train_max1 = train1_combined.max()
+    train_min2 = train2_combined.min()
+    train_max2 = train2_combined.max()
+    expected1 = (valid1 - train_min1) / (train_max1 - train_min1)
+    expected2 = (valid2 - train_min2) / (train_max2 - train_min2)
+    train1_stacked = torch.cat([train1.view(-1, 1), train3.view(-1, 1)], dim=1)
+    train2_stacked = torch.cat([train2.view(-1, 1), train4.view(-1, 1)], dim=1)
+    valid_stacked = torch.cat([valid1.view(-1, 1), valid2.view(-1, 1)], dim=1)
+    module = MinMaxScale.stack([MinMaxScale(), MinMaxScale()])
+    stats1 = module.calculate_stats(train1_stacked)
+    stats2 = module.calculate_stats(train2_stacked)
+    stats = module.combine_stats([stats1, stats2])
+    module.apply_stats(stats)
+
+    received = module(valid_stacked)
+    received1 = received[:, 0]
+    received2 = received[:, 1]
+
+    assert torch.allclose(module.vmin[0], train_min1)
+    assert torch.allclose(module.vdelta[0], train_max1 - train_min1)
+    assert torch.allclose(module.vmin[1], train_min2)
+    assert torch.allclose(module.vdelta[1], train_max2 - train_min2)
+    assert torch.allclose(received1, expected1)
+    assert torch.allclose(received2, expected2)
+
+
+def test_min_max_scale_pre_calculated_stack():
+    train1 = torch.rand(50, dtype=torch.float64)
+    train2 = torch.rand(50, dtype=torch.float64)
+    train3 = torch.rand(50, dtype=torch.float64)
+    train4 = torch.rand(50, dtype=torch.float64)
+    valid1 = torch.rand(50, dtype=torch.float64)
+    valid2 = torch.rand(50, dtype=torch.float64)
+    train1_combined = torch.cat([train1, train2])
+    train2_combined = torch.cat([train3, train4])
+    train_min1 = train1_combined.min()
+    train_max1 = train1_combined.max()
+    train_min2 = train2_combined.min()
+    train_max2 = train2_combined.max()
+    expected1 = (valid1 - train_min1) / (train_max1 - train_min1)
+    expected2 = (valid2 - train_min2) / (train_max2 - train_min2)
+    valid_stacked = torch.cat([valid1.view(-1, 1), valid2.view(-1, 1)], dim=1)
+    module1 = MinMaxScale()
+    module2 = MinMaxScale()
+    stats1 = module1.calculate_stats(train1)
+    stats2 = module1.calculate_stats(train2)
+    stats12 = module1.combine_stats([stats1, stats2])
+    module1.apply_stats(stats12)
+    stats3 = module2.calculate_stats(train3)
+    stats4 = module2.calculate_stats(train4)
+    stats34 = module2.combine_stats([stats3, stats4])
+    module2.apply_stats(stats34)
+    module = MinMaxScale.stack([module1, module2])
+
+    received = module(valid_stacked)
+    received1 = received[:, 0]
+    received2 = received[:, 1]
+
+    assert torch.allclose(module.vmin[0], train_min1)
+    assert torch.allclose(module.vdelta[0], train_max1 - train_min1)
+    assert torch.allclose(module.vmin[1], train_min2)
+    assert torch.allclose(module.vdelta[1], train_max2 - train_min2)
+    assert torch.allclose(received1, expected1)
+    assert torch.allclose(received2, expected2)
 
 
 def test_standard_score_biased():
