@@ -4,7 +4,7 @@ from typing import List
 import pytest
 import torch
 
-from torchestra import Parallel, Sequential, field_modules
+from torchestra import Parallel, Sequential, TupleAsArgs, field_modules
 
 
 @field_modules
@@ -334,3 +334,47 @@ def test_parallel_repr():
     received = repr(module)
 
     assert received == "Parallel([Add(), Identity(), Add()], names=None, into=<class 'list'>)"
+
+
+def test_tuple_as_args():
+    class TestModule(torch.nn.Module):
+        def forward(self, x: int, y: str) -> int:
+            return x + len(y)
+
+    module = TupleAsArgs(TestModule())
+    compiled = torch.jit.script(module)
+    inputs = (1, "foo")
+
+    received = module(inputs)
+    received_compiled = compiled(inputs)
+
+    assert received == 4
+    assert received_compiled == 4
+
+
+def test_tuple_as_args_not_a_module():
+    class TestModule:
+        def forward(self, x):
+            return x
+
+    with pytest.raises(Exception):
+        _module = TupleAsArgs(TestModule())
+
+
+def test_tuple_as_args_inner():
+    class TestModule(torch.nn.Module):
+        def forward(self, x: int, y: str) -> int:
+            return x + len(y)
+
+    inner = TestModule()
+    module = TupleAsArgs(inner)
+
+    assert module.inner is inner
+
+
+def test_tuple_as_args_repr():
+    module = TupleAsArgs(Add(1))
+
+    received = repr(module)
+
+    assert received == "TupleAsArgs(Add())"

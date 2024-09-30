@@ -3,7 +3,7 @@ from typing import Dict, Iterable, List, OrderedDict, Set, Tuple
 
 import torch
 
-from ._pipes import Parallel, Sequential
+from ._pipes import Parallel, Sequential, TupleAsArgs
 
 STATS_PLAN_INPUT_MAPPING_ALL = -1
 STATS_PLAN_INPUT_MAPPING_BYPASS = -2
@@ -28,6 +28,8 @@ class StatsPlan:
         if isinstance(module, Parallel) or isinstance(module, Sequential):
             for i, m in enumerate(module):
                 yield from self._find_stats_modules(m, f"{path}.{i}" if path else str(i))
+        elif isinstance(module, TupleAsArgs):
+            yield from self._find_stats_modules(module.inner, f"{path}.inner" if path else "inner")
 
         if hasattr(module, "calculate_stats") and hasattr(module, "combine_stats") and hasattr(module, "apply_stats"):
             yield path

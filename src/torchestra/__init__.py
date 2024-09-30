@@ -53,6 +53,9 @@ from ._pipes import (
     Sequential as Sequential,
 )
 from ._pipes import (
+    TupleAsArgs as TupleAsArgs,
+)
+from ._pipes import (
     field_modules as field_modules,
 )
 from ._sparse_slices import (
