@@ -2,7 +2,14 @@ from typing import List, OrderedDict
 
 import torch
 
-from torchestra import STATS_PLAN_INPUT_MAPPING_ALL, STATS_PLAN_INPUT_MAPPING_BYPASS, Parallel, Sequential, StatsPlan
+from torchestra import (
+    STATS_PLAN_INPUT_MAPPING_ALL,
+    STATS_PLAN_INPUT_MAPPING_BYPASS,
+    Parallel,
+    Sequential,
+    StatsPlan,
+    TupleAsArgs,
+)
 
 
 class Add(torch.nn.Module):
@@ -12,6 +19,11 @@ class Add(torch.nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return x + self.y
+
+
+class Add2(torch.nn.Module):
+    def forward(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+        return x + y
 
 
 class Mul(torch.nn.Module):
@@ -211,6 +223,45 @@ def test_sidechain():
     assert stats_plan.stages[1].module_paths == ["0.2"]
     assert stats_plan.stages[1].input_mapping == [STATS_PLAN_INPUT_MAPPING_ALL]
     assert stats_plan.stages[1].graph(torch.tensor(5.0)) == torch.tensor(7.0)
+
+
+def test_stats_plan_tuple_as_args():
+    graph = Sequential(
+        TotalAdder(),
+        Parallel(
+            [
+                Sequential(Add(torch.tensor(1.0)), TotalAdder()),
+                Mul(torch.tensor(2.0)),
+            ],
+            into=tuple,
+        ),
+        TupleAsArgs(Add2()),
+        TotalAdder(),
+        Add(1.0),
+    )
+
+    stats_plan = StatsPlan(graph)
+    stats_plan.root.get_submodule("0").total += 1
+    stats_plan.root.get_submodule("1.0.1").total += 2
+    stats_plan.root.get_submodule("3").total += 3
+
+    assert stats_plan.stats_module_paths == ["0", "1.0.1", "3"]
+    assert stats_plan.dependencies == {
+        "0": set(),
+        "1.0.1": {"0"},
+        "3": {"0", "1.0.1"},
+    }
+
+    assert len(stats_plan.stages) == 3
+    assert stats_plan.stages[0].module_paths == ["0"]
+    assert stats_plan.stages[0].input_mapping == [STATS_PLAN_INPUT_MAPPING_BYPASS]
+    assert isinstance(stats_plan.stages[0].graph, torch.nn.Identity)
+    assert stats_plan.stages[1].module_paths == ["1.0.1"]
+    assert stats_plan.stages[1].input_mapping == [STATS_PLAN_INPUT_MAPPING_ALL]
+    assert stats_plan.stages[1].graph(torch.tensor(5.0)) == torch.tensor(7.0)
+    assert stats_plan.stages[2].module_paths == ["3"]
+    assert stats_plan.stages[2].input_mapping == [STATS_PLAN_INPUT_MAPPING_ALL]
+    assert stats_plan.stages[2].graph(torch.tensor(5.0)) == torch.tensor(21.0)
 
 
 def test_stats_plan_complete():

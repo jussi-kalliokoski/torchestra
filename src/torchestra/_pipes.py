@@ -1,5 +1,6 @@
 import functools
 import inspect
+import operator
 from typing import Dict, Iterable, Iterator, List, Optional, Tuple, TypeVar
 
 import torch
@@ -300,6 +301,39 @@ class Parallel(torch.fx.GraphModule):
             + ", ".join(repr(m) for m in self)
             + f"], names={repr(self.names)}, into={repr(self.into)})"
         )
+
+
+class TupleAsArgs(torch.fx.GraphModule):
+    """
+    Converts a module that takes multiple arguments into a module that takes a tuple.
+
+    This module is used to convert a module that takes multiple arguments into a
+    module that takes a single tuple argument. This can be useful when combining
+    results from `Parallel` into a tuple and then have the next module expect the
+    arguments with proper names.
+
+    NOTE: Using subgraphs inside TupleAsArgs is not supported yet.
+
+    Args:
+        module: The module to convert.
+    """
+
+    def __init__(self, module: torch.nn.Module):
+        sig = _get_signature(module)
+        module_lib = torch.nn.Module()
+        module_lib.add_module("inner", module)
+        graph = torch.fx.Graph()
+        arg_types = tuple(p.annotation for p in sig.parameters.values())
+        all_args = graph.placeholder("x", Tuple.__getitem__(arg_types))
+        args = [graph.call_function(operator.getitem, (all_args, i), type_expr=t) for i, t in enumerate(arg_types)]
+        result = graph.call_module("inner", tuple(args), type_expr=sig.return_annotation)
+        graph.output(result, type_expr=sig.return_annotation)
+
+        super().__init__(module_lib, graph)
+        self.inner = module
+
+    def __repr__(self) -> str:
+        return f"{TupleAsArgs.__name__}({repr(self.inner)})"
 
 
 def _identity_signature(modules: List[torch.nn.Module]) -> inspect.Signature:
