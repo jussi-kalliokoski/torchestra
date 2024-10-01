@@ -58,7 +58,7 @@ class CountLookup(torch.nn.Module):
         for stat in stats:
             for k, v in stat.items():
                 counts[k] = counts.get(k, 0) + v
-        return self.eliminator(counts)
+        return counts
 
     def apply_stats(self, counts: Dict[str, int]) -> None:
         """
@@ -69,6 +69,7 @@ class CountLookup(torch.nn.Module):
         Args:
             counts: The statistics to apply.
         """
+        counts = self.eliminator(counts)
         self.total = torch.tensor(sum(counts.values()), dtype=self.total.dtype)
         self.counts = counts if self.total > 0 else {"": 0}
 
@@ -202,6 +203,7 @@ class IndexLookup(torch.nn.Module):
         Args:
             counts: The statistics to apply.
         """
+        counts = self._count_lookup.eliminator(counts)
         if sum(counts.values()) < 1:
             self.lookup = {"": self.unknown_idx}
             return
