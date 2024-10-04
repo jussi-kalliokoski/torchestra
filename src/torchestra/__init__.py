@@ -11,6 +11,15 @@ from ._lookups import (
     IndexLookup as IndexLookup,
 )
 from ._lookups import (
+    IntCountLookup as IntCountLookup,
+)
+from ._lookups import (
+    IntIndexLookup as IntIndexLookup,
+)
+from ._lookups import (
+    IntRatioLookup as IntRatioLookup,
+)
+from ._lookups import (
     MinThreshold as MinThreshold,
 )
 from ._lookups import (

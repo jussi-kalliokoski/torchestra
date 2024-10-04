@@ -2,7 +2,17 @@ from typing import Dict, List
 
 import torch
 
-from torchestra import CountLookup, IndexLookup, MinThreshold, RatioLookup, RatioThreshold, TopK
+from torchestra import (
+    CountLookup,
+    IndexLookup,
+    IntCountLookup,
+    IntIndexLookup,
+    IntRatioLookup,
+    MinThreshold,
+    RatioLookup,
+    RatioThreshold,
+    TopK,
+)
 
 
 class CalculateStatsModule(torch.nn.Module):
@@ -20,6 +30,24 @@ class CombineStatsModule(torch.nn.Module):
         self.mod = mod
 
     def forward(self, x: List[Dict[str, int]]) -> Dict[str, int]:
+        return self.mod.combine_stats(x)
+
+
+class IntCalculateStatsModule(torch.nn.Module):
+    def __init__(self, mod):
+        super().__init__()
+        self.mod = mod
+
+    def forward(self, x: torch.Tensor) -> Dict[int, int]:
+        return self.mod.calculate_stats(x)
+
+
+class IntCombineStatsModule(torch.nn.Module):
+    def __init__(self, mod):
+        super().__init__()
+        self.mod = mod
+
+    def forward(self, x: List[Dict[int, int]]) -> Dict[int, int]:
         return self.mod.combine_stats(x)
 
 
@@ -226,6 +254,213 @@ def test_index_lookup_eliminator():
 
     assert module.dictionary_size() == 4
     assert all(module(["a", "b", "c", "d", "e", "f"]) == torch.tensor([2, 3, 1, 1, 1, 1]))
+
+
+def test_int_count_lookup():
+    module = IntCountLookup()
+    stats1 = module.calculate_stats(torch.tensor([1, 2, 1, -3, 1, 2, 4, 1, 2, -3, 1, 2, 4]))
+    stats2 = module.calculate_stats(torch.tensor([1, 2, 1, 5, 5, 5, 4, 5, 2, -3, 1, 2, 4]))
+    combined_stats = module.combine_stats([stats1, stats2])
+    module.apply_stats(combined_stats)
+
+    assert stats1 == {1: 5, 2: 4, -3: 2, 4: 2}
+    assert stats2 == {1: 3, 2: 3, -3: 1, 4: 2, 5: 4}
+    assert combined_stats == {1: 8, 2: 7, -3: 3, 4: 4, 5: 4}
+    assert all(module(torch.tensor([1, 2, -3, 4, 5, 6])) == torch.tensor([8, 7, 3, 4, 4, 0]))
+
+
+def test_int_count_lookup_eliminator():
+    module = IntCountLookup(MinThreshold(5))
+    stats1 = module.calculate_stats(torch.tensor([1, 2, 1, -3, 1, 2, 4, 1, 2, -3, 1, 2, 4]))
+    stats2 = module.calculate_stats(torch.tensor([1, 2, 1, 5, 5, 5, 4, 5, 2, -3, 1, 2, 4]))
+    combined_stats = module.combine_stats([stats1, stats2])
+    module.apply_stats(combined_stats)
+
+    assert all(module(torch.tensor([1, 2, -3, 4, 5, 6])) == torch.tensor([8, 7, 0, 0, 0, 0]))
+
+
+def test_int_count_lookup_state_dict():
+    module = IntCountLookup()
+    stats1 = module.calculate_stats(torch.tensor([1, 2, 1, -3, 1, 2, 4, 1, 2, -3, 1, 2, 4]))
+    stats2 = module.calculate_stats(torch.tensor([1, 2, 1, 5, 5, 5, 4, 5, 2, -3, 1, 2, 4]))
+    combined_stats = module.combine_stats([stats1, stats2])
+    module.apply_stats(combined_stats)
+    state_dict = module.state_dict()
+    module = IntCountLookup()
+    module.load_state_dict(state_dict)
+
+    assert all(module(torch.tensor([1, 2, -3, 4, 5, 6])) == torch.tensor([8, 7, 3, 4, 4, 0]))
+
+
+def test_int_count_lookup_empty():
+    module = IntCountLookup()
+    initial = torch.jit.script(module)(torch.tensor([1, 2, 3]))
+    stats = module.calculate_stats(torch.tensor([]))
+    combined_stats = module.combine_stats([stats])
+    module.apply_stats(combined_stats)
+    compiled = torch.jit.script(module)
+
+    received = module(torch.tensor([1, 2, 3]))
+    received_compiled = compiled(torch.tensor([1, 2, 3]))
+
+    assert all(initial == torch.tensor([0, 0, 0]))
+    assert all(received == torch.tensor([0, 0, 0]))
+    assert all(received_compiled == torch.tensor([0, 0, 0]))
+
+
+def test_int_count_lookup_script_stats():
+    module = IntCountLookup()
+    calculate_stats = torch.jit.script(IntCalculateStatsModule(module))
+    combine_stats = torch.jit.script(IntCombineStatsModule(module))
+    stats1 = calculate_stats(torch.tensor([1, 2, 1, -3, 1, 2, 4, 1, 2, -3, 1, 2, 4]))
+    stats2 = calculate_stats(torch.tensor([1, 2, 1, 5, 5, 5, 4, 5, 2, -3, 1, 2, 4]))
+    combined_stats = combine_stats([stats1, stats2])
+    module.apply_stats(combined_stats)
+    compiled = torch.jit.script(module)
+
+    assert all(compiled(torch.tensor([1, 2, -3, 4, 5, 6])) == torch.tensor([8, 7, 3, 4, 4, 0]))
+
+
+def test_int_ratio_lookup():
+    module = IntRatioLookup()
+    stats1 = module.calculate_stats(torch.tensor([1, 2, 1, -3, 1, 2, 4, 1, 2, -3, 1, 2, 4]))
+    stats2 = module.calculate_stats(torch.tensor([1, 2, 1, 5, 5, 5, 4, 5, 2, -3, 1, 2, 4]))
+    combined_stats = module.combine_stats([stats1, stats2])
+    module.apply_stats(combined_stats)
+
+    assert all(module(torch.tensor([1, 2, -3, 4, 5, 6])) == torch.tensor([8 / 26, 7 / 26, 3 / 26, 4 / 26, 4 / 26, 0.0]))
+
+
+def test_int_ratio_lookup_eliminator():
+    module = IntRatioLookup(MinThreshold(5))
+    stats1 = module.calculate_stats(torch.tensor([1, 2, 1, -3, 1, 2, 4, 1, 2, -3, 1, 2, 4]))
+    stats2 = module.calculate_stats(torch.tensor([1, 2, 1, 5, 5, 5, 4, 5, 2, -3, 1, 2, 4]))
+    combined_stats = module.combine_stats([stats1, stats2])
+    module.apply_stats(combined_stats)
+
+    assert all(module(torch.tensor([1, 2, -3, 4, 5, 6])) == torch.tensor([8 / 15, 7 / 15, 0.0, 0.0, 0.0, 0.0]))
+
+
+def test_int_ratio_lookup_state_dict():
+    module = IntRatioLookup()
+    stats1 = module.calculate_stats(torch.tensor([1, 2, 1, -3, 1, 2, 4, 1, 2, -3, 1, 2, 4]))
+    stats2 = module.calculate_stats(torch.tensor([1, 2, 1, 5, 5, 5, 4, 5, 2, -3, 1, 2, 4]))
+    combined_stats = module.combine_stats([stats1, stats2])
+    module.apply_stats(combined_stats)
+    state_dict = module.state_dict()
+    module = IntRatioLookup()
+    module.load_state_dict(state_dict)
+
+    assert all(module(torch.tensor([1, 2, -3, 4, 5, 6])) == torch.tensor([8 / 26, 7 / 26, 3 / 26, 4 / 26, 4 / 26, 0.0]))
+
+
+def test_int_ratio_lookup_empty():
+    module = IntRatioLookup()
+    initial = torch.jit.script(module)(torch.tensor([1, 2, 3]))
+    stats = module.calculate_stats(torch.tensor([]))
+    combined_stats = module.combine_stats([stats])
+    module.apply_stats(combined_stats)
+    compiled = torch.jit.script(module)
+
+    received = module(torch.tensor([1, 2, 3]))
+    received_compiled = compiled(torch.tensor([1, 2, 3]))
+
+    assert all(initial == torch.tensor([0.0, 0.0, 0.0]))
+    assert all(received == torch.tensor([0.0, 0.0, 0.0]))
+    assert all(received_compiled == torch.tensor([0.0, 0.0, 0.0]))
+
+
+def test_int_ratio_lookup_script_stats():
+    module = IntRatioLookup()
+    calculate_stats = torch.jit.script(IntCalculateStatsModule(module))
+    combine_stats = torch.jit.script(IntCombineStatsModule(module))
+    stats1 = calculate_stats(torch.tensor([1, 2, 1, -3, 1, 2, 4, 1, 2, -3, 1, 2, 4]))
+    stats2 = calculate_stats(torch.tensor([1, 2, 1, 5, 5, 5, 4, 5, 2, -3, 1, 2, 4]))
+    combined_stats = combine_stats([stats1, stats2])
+    module.apply_stats(combined_stats)
+    compiled = torch.jit.script(module)
+
+    assert all(
+        compiled(torch.tensor([1, 2, -3, 4, 5, 6])) == torch.tensor([8 / 26, 7 / 26, 3 / 26, 4 / 26, 4 / 26, 0.0])
+    )
+
+
+def test_int_index_lookup():
+    module = IntIndexLookup()
+    stats1 = module.calculate_stats(torch.tensor([1, 2, 1, -3, 1, 2, 4, 1, 2, -3, 1, 2, 4]))
+    stats2 = module.calculate_stats(torch.tensor([1, 2, 1, 5, 5, 5, 4, 5, 2, -3, 1, 2, 4]))
+    combined_stats = module.combine_stats([stats1, stats2])
+    module.apply_stats(combined_stats)
+
+    assert module.dictionary_size() == 7
+    assert all(module(torch.tensor([1, 2, -3, 4, 5, 6])) == torch.tensor([2, 3, 6, 4, 5, 1]))
+
+
+def test_int_index_lookup_custom_indices():
+    module = IntIndexLookup(padding_idx=1, unknown_idx=2)
+    stats1 = module.calculate_stats(torch.tensor([1, 2, 1, -3, 1, 2, 4, 1, 2, -3, 1, 2, 4]))
+    stats2 = module.calculate_stats(torch.tensor([1, 2, 1, 5, 5, 5, 4, 5, 2, -3, 1, 2, 4]))
+    combined_stats = module.combine_stats([stats1, stats2])
+    module.apply_stats(combined_stats)
+
+    assert module.dictionary_size() == 7
+    assert all(module(torch.tensor([1, 2, -3, 4, 5, 6])) == torch.tensor([0, 3, 6, 4, 5, 2]))
+
+
+def test_int_index_lookup_state_dict():
+    module = IntIndexLookup()
+    stats1 = module.calculate_stats(torch.tensor([1, 2, 1, -3, 1, 2, 4, 1, 2, -3, 1, 2, 4]))
+    stats2 = module.calculate_stats(torch.tensor([1, 2, 1, 5, 5, 5, 4, 5, 2, -3, 1, 2, 4]))
+    combined_stats = module.combine_stats([stats1, stats2])
+    module.apply_stats(combined_stats)
+    state_dict = module.state_dict()
+    module = IntIndexLookup()
+    module.load_state_dict(state_dict)
+
+    assert module.dictionary_size() == 7
+    assert all(module(torch.tensor([1, 2, -3, 4, 5, 6])) == torch.tensor([2, 3, 6, 4, 5, 1]))
+
+
+def test_int_index_lookup_empty():
+    module = IntIndexLookup()
+    initial = torch.jit.script(module)(torch.tensor([1, 2, 3]))
+    stats = module.calculate_stats(torch.tensor([]))
+    combined_stats = module.combine_stats([stats])
+    module.apply_stats(combined_stats)
+    compiled = torch.jit.script(module)
+
+    received = module(torch.tensor([1, 2, 3]))
+    received_compiled = compiled(torch.tensor([1, 2, 3]))
+
+    assert module.dictionary_size() == 2
+    assert all(initial == torch.tensor([1, 1, 1]))
+    assert all(received == torch.tensor([1, 1, 1]))
+    assert all(received_compiled == torch.tensor([1, 1, 1]))
+
+
+def test_int_index_lookup_script_stats():
+    module = IntIndexLookup()
+    calculate_stats = torch.jit.script(IntCalculateStatsModule(module))
+    combine_stats = torch.jit.script(IntCombineStatsModule(module))
+    stats1 = calculate_stats(torch.tensor([1, 2, 1, -3, 1, 2, 4, 1, 2, -3, 1, 2, 4]))
+    stats2 = calculate_stats(torch.tensor([1, 2, 1, 5, 5, 5, 4, 5, 2, -3, 1, 2, 4]))
+    combined_stats = combine_stats([stats1, stats2])
+    module.apply_stats(combined_stats)
+    compiled = torch.jit.script(module)
+
+    assert module.dictionary_size() == 7
+    assert all(compiled(torch.tensor([1, 2, -3, 4, 5, 6])) == torch.tensor([2, 3, 6, 4, 5, 1]))
+
+
+def test_int_index_lookup_eliminator():
+    module = IntIndexLookup(eliminator=MinThreshold(5))
+    stats1 = module.calculate_stats(torch.tensor([1, 2, 1, -3, 1, 2, 4, 1, 2, -3, 1, 2, 4]))
+    stats2 = module.calculate_stats(torch.tensor([1, 2, 1, 5, 5, 5, 4, 5, 2, -3, 1, 2, 4]))
+    combined_stats = module.combine_stats([stats1, stats2])
+    module.apply_stats(combined_stats)
+
+    assert module.dictionary_size() == 4
+    assert all(module(torch.tensor([1, 2, -3, 4, 5, 6])) == torch.tensor([2, 3, 1, 1, 1, 1]))
 
 
 def test_min_threshold():
