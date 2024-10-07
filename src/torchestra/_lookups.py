@@ -217,7 +217,7 @@ class IndexLookup(torch.nn.Module):
             taken.add(i)
 
     def forward(self, x: List[str]) -> torch.Tensor:
-        return torch.tensor([self.lookup.get(_x, self.unknown_idx) for _x in x])
+        return torch.tensor([self.lookup.get(_x, self.unknown_idx) for _x in x], dtype=torch.int64)
 
 
 class IntCountLookup(torch.nn.Module):

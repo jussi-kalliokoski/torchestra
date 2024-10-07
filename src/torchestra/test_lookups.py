@@ -256,6 +256,15 @@ def test_index_lookup_eliminator():
     assert all(module(["a", "b", "c", "d", "e", "f"]) == torch.tensor([2, 3, 1, 1, 1, 1]))
 
 
+def test_index_lookup_empty_input():
+    module = IndexLookup()
+
+    received = module([])
+
+    assert received.dtype == torch.int64
+    assert all(received == torch.tensor([], dtype=torch.int64))
+
+
 def test_int_count_lookup():
     module = IntCountLookup()
     stats1 = module.calculate_stats(torch.tensor([1, 2, 1, -3, 1, 2, 4, 1, 2, -3, 1, 2, 4]))
