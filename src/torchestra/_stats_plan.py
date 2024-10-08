@@ -19,37 +19,33 @@ class StatsPlanStage:
 class StatsPlan:
     def __init__(self, root: torch.nn.Module):
         self.root = root
-        self.stats_module_paths = [*self._find_stats_modules(root, path="")]
-        self.dependencies: Dict[str, Set[str]] = {k: set() for k in self.stats_module_paths}
-        self._find_dependencies()
+        self.dependencies = self._find_stats_modules(root, found={}, path="")
+        self.stats_module_paths = list(self.dependencies.keys())
         self.stages = [*self._build_stages()]
 
-    def _find_stats_modules(self, module: torch.nn.Module, path: str) -> Iterable[str]:
-        if isinstance(module, Parallel) or isinstance(module, Sequential):
+    def _find_stats_modules(
+        self, module: torch.nn.Module, found: Dict[str, Set[str]], path: str
+    ) -> Dict[str, Set[str]]:
+        if isinstance(module, Parallel):
+            prev = found
             for i, m in enumerate(module):
-                yield from self._find_stats_modules(m, f"{path}.{i}" if path else str(i))
-        elif isinstance(module, TupleAsArgs):
-            yield from self._find_stats_modules(module.inner, f"{path}.inner" if path else "inner")
+                found = _union(found, self._find_stats_modules(m, prev, f"{path}.{i}" if path else str(i)), orig=prev)
+            return found
+
+        if isinstance(module, Sequential):
+            for i, m in enumerate(module):
+                found = _union(found, self._find_stats_modules(m, found, f"{path}.{i}" if path else str(i)), orig=found)
+            return found
+
+        if isinstance(module, TupleAsArgs):
+            return _union(
+                found, self._find_stats_modules(module.inner, found, f"{path}.inner" if path else "inner"), orig=found
+            )
 
         if hasattr(module, "calculate_stats") and hasattr(module, "combine_stats") and hasattr(module, "apply_stats"):
-            yield path
+            return {**found, path: set(found.keys())}
 
-    def _find_dependencies(self):
-        for p1 in self.stats_module_paths:
-            for p2 in self.stats_module_paths:
-                if p1 != p2 and self._depends_on(p1, p2):
-                    self.dependencies[p1].add(p2)
-
-    def _depends_on(self, path1: str, path2: str) -> bool:
-        if path1 == "" or path2 == "":
-            return False
-        parent_path1, _, name1 = path1.rpartition(".")
-        parent_path2, _, name2 = path2.rpartition(".")
-        parent1 = self.root.get_submodule(parent_path1)
-        parent2 = self.root.get_submodule(parent_path2)
-        if parent1 is parent2:
-            return isinstance(parent1, Sequential) and int(name1) > int(name2)
-        return self._depends_on(parent_path1, path2) or self._depends_on(path1, parent_path2)
+        return found
 
     def _build_stages(self) -> Iterable[StatsPlanStage]:
         for module_paths in self._get_execution_plan_modules():
@@ -118,3 +114,9 @@ class StatsPlan:
                 return f"{int(name) - 1}"
             return f"{parent_path}.{int(name) - 1}"
         return self._find_input(parent_path)
+
+
+def _union(d1: Dict[str, Set[str]], d2: Dict[str, Set[str]], orig: Dict[str, Set[str]]) -> Dict[str, Set[str]]:
+    if d2 is orig:
+        return d1
+    return {**d1, **d2}
