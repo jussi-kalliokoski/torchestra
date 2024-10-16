@@ -23,11 +23,50 @@ def test_cat():
 
 def test_nan_to_num():
     module = NanToNum()
+    jit_module = torch.jit.script(module)
     x = torch.tensor([1, 2, float("nan"), 4])
 
     received = module(x)
+    jit_received = jit_module(x)
 
     assert torch.equal(received, torch.tensor([1, 2, 0, 4]))
+    assert torch.equal(jit_received, torch.tensor([1, 2, 0, 4]))
+
+
+def test_nan_to_num_nan_override():
+    module = NanToNum(nan=5.0)
+    jit_module = torch.jit.script(module)
+    x = torch.tensor([1, 2, float("nan"), 4])
+
+    received = module(x)
+    jit_received = jit_module(x)
+
+    assert torch.equal(received, torch.tensor([1, 2, 5, 4]))
+    assert torch.equal(jit_received, torch.tensor([1, 2, 5, 4]))
+
+
+def test_nan_to_num_posinf_override():
+    module = NanToNum(posinf=5.0)
+    jit_module = torch.jit.script(module)
+    x = torch.tensor([1, 2, float("inf"), 4])
+
+    received = module(x)
+    jit_received = jit_module(x)
+
+    assert torch.equal(received, torch.tensor([1, 2, 5, 4]))
+    assert torch.equal(jit_received, torch.tensor([1, 2, 5, 4]))
+
+
+def test_nan_to_num_neginf_override():
+    module = NanToNum(neginf=5.0)
+    jit_module = torch.jit.script(module)
+    x = torch.tensor([1, 2, float("-inf"), 4])
+
+    received = module(x)
+    jit_received = jit_module(x)
+
+    assert torch.equal(received, torch.tensor([1, 2, 5, 4]))
+    assert torch.equal(jit_received, torch.tensor([1, 2, 5, 4]))
 
 
 def test_clamp():

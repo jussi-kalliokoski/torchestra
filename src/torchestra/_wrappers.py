@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Optional
 
 import torch
 
@@ -44,10 +44,21 @@ class NanToNum(torch.nn.Module):
     Replaces NaN values in a tensor with zeros.
 
     This is a simple wrapper around `torch.nan_to_num` to expose it as a composable module.
+
+    Args:
+        nan: The value with which to replace NaN values.
+        posinf: The value with which to replace positive infinity values.
+        neginf: The value with which to replace negative infinity values.
     """
 
+    def __init__(self, nan: Optional[float] = 0.0, posinf: Optional[float] = None, neginf: Optional[float] = None):
+        super().__init__()
+        self.nan = nan
+        self.posinf = posinf
+        self.neginf = neginf
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return x.nan_to_num()
+        return x.nan_to_num(nan=self.nan, posinf=self.posinf, neginf=self.neginf)
 
 
 class Clamp(torch.nn.Module):
